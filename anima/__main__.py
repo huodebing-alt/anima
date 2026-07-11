@@ -42,6 +42,11 @@ def cmd_run(cfg, args) -> None:
     print(f"{cfg.agent_name} stopped after {mind.tick_count} ticks.")
 
 
+def cmd_ui(cfg, args) -> None:
+    from .server import serve
+    serve(args.port, getattr(args, "config", None))
+
+
 def cmd_talk(cfg, args) -> None:
     print(f"Talking to {cfg.agent_name}. Type messages; /sleep forces sleep; "
           "/quit exits.")
@@ -171,6 +176,10 @@ def main() -> None:
     p.add_argument("--max-ticks", type=int, default=0)
     p.add_argument("--max-seconds", type=float, default=0.0)
     p.set_defaults(fn=cmd_run)
+
+    p = sub.add_parser("ui")
+    p.add_argument("--port", type=int, default=8765)
+    p.set_defaults(fn=cmd_ui)
 
     p = sub.add_parser("talk")
     p.add_argument("--thoughts", action="store_true",

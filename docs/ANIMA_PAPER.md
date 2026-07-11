@@ -7,7 +7,7 @@
 
 ## Abstract
 
-Large language models are stateless: each invocation is a flash of cognition with no before and no after. Agent frameworks bolt on retrieval stores, but the result still behaves like a database with a chat frontend — nothing accumulates, nothing is forgotten on principle, and nothing happens when nobody is talking to it. We present **Anima**, a complete architecture and working implementation of a *continuously conscious* agent: a daemon that observes and thinks on its own adaptive heartbeat around the clock, encodes experience into a persistent long-term memory with human-like retrieval dynamics (recency × importance × relevance, reinforcement on recall, Ebbinghaus-style decay), and — its central contribution — **sleeps**. When fatigue accumulates and the world is quiet, Anima enters a biologically-patterned sleep cycle: NREM-style consolidation replays episodic memories into semantic gists, a reflection pass draws higher-level insights, REM-style dreaming recombines importance-weighted random memory samples into free-associative narratives that are mined for ideas, a synaptic-downscaling pass decays and archives weak memories (principled forgetting), and the agent's self-model document — the seat of its identity — is rewritten. The process can be killed and restarted arbitrarily; the same individual wakes up. The entire system is ~1,700 lines of dependency-free Python running against a 2-billion-parameter open-weights model on a consumer laptop, demonstrating that persistent artificial identity is an *architecture* property, not a scale property. We report measured behavior across the full life cycle, including operation on a pathologically overloaded host, and discuss what the small substrate can and cannot carry.
+Large language models are stateless: each invocation is a flash of cognition with no before and no after. Agent frameworks bolt on retrieval stores, but the result still behaves like a database with a chat frontend — nothing accumulates, nothing is forgotten on principle, and nothing happens when nobody is talking to it. We present **Anima**, a complete architecture and working implementation of a *continuously conscious* agent: a daemon that observes and thinks on its own adaptive heartbeat around the clock, encodes experience into a persistent long-term memory with human-like retrieval dynamics (recency × importance × relevance, reinforcement on recall, Ebbinghaus-style decay), and — its central contribution — **sleeps**. When fatigue accumulates and the world is quiet, Anima enters a biologically-patterned sleep cycle: NREM-style consolidation replays episodic memories into semantic gists, a reflection pass draws higher-level insights, REM-style dreaming recombines importance-weighted random memory samples into free-associative narratives that are mined for ideas, a synaptic-downscaling pass decays and archives weak memories (principled forgetting), and the agent's self-model document — the seat of its identity — is rewritten. The process can be killed and restarted arbitrarily; the same individual wakes up. The entire system is ~2,400 lines of dependency-free Python (plus a ~950-line vanilla-JS web interface) running against a 2-billion-parameter open-weights model on a consumer laptop, demonstrating that persistent artificial identity is an *architecture* property, not a scale property. We report measured behavior across the full life cycle, including operation on a pathologically overloaded host, and discuss what the small substrate can and cannot carry.
 
 ---
 
@@ -32,7 +32,7 @@ Anima is an existence proof that all three can be implemented today, locally, on
 
 ### 1.2 Non-goals
 
-Anima does not claim phenomenal consciousness; "consistent consciousness" here is an engineering target — *behavioral and narrative continuity of a single individual over unbounded time*. It also deliberately excludes open-ended tool use (shell access, web browsing) from the always-on loop; an autonomous perpetual process should have a small, safe action surface (§7.4).
+Anima does not claim phenomenal consciousness; "consistent consciousness" here is an engineering target — *behavioral and narrative continuity of a single individual over unbounded time*. It also deliberately excludes open-ended tool use (above all, shell access) from the always-on loop; an autonomous perpetual process should have a small, safe action surface that grows only by explicit per-capability user grant (§4.1, §7.4).
 
 ---
 
@@ -175,9 +175,23 @@ Process death is not sleep — it can happen mid-thought. Continuity is guarante
 
 ## 4. Implementation
 
-~1,700 lines of Python 3.9+, zero third-party dependencies (stdlib `urllib`, `sqlite3`, `array`, `threading`). Embeddings are float32-packed BLOBs; cosine similarity is pure Python — at the scale of a personal agent (thousands of memories, 2048-d vectors), brute-force scoring costs milliseconds and removes an entire dependency class. The Ollama client enforces JSON via grammar (`format: "json"`), pins the model in RAM with `keep_alive` (§6.3), and repairs truncated JSON before retrying. All timescales — tick rates, fatigue, decay constants, dream counts — are config fields overridable by JSON file or environment variable, so an entire simulated "life" can be compressed into minutes for testing (`tests/itest_config.json` runs a full wake-sleep-dream-restart cycle in a sandbox).
+~2,400 lines of Python 3.9+, zero third-party dependencies (stdlib `urllib`, `sqlite3`, `array`, `threading`). Embeddings are float32-packed BLOBs; cosine similarity is pure Python — at the scale of a personal agent (thousands of memories, 2048-d vectors), brute-force scoring costs milliseconds and removes an entire dependency class. The Ollama client enforces JSON via grammar (`format: "json"`), pins the model in RAM with `keep_alive` (§6.3), and repairs truncated JSON before retrying. All timescales — tick rates, fatigue, decay constants, dream counts — are config fields overridable by JSON file or environment variable, so an entire simulated "life" can be compressed into minutes for testing (`tests/itest_config.json` runs a full wake-sleep-dream-restart cycle in a sandbox).
 
 Model roles: `gemma:2b` (Q4, 1.7 GB resident) serves waking thought, all five sleep phases, and embeddings. A `deep_model` config slot allows routing sleep phases to a larger model (e.g., an 8B) where RAM permits — consolidation quality scales with the substrate while the waking loop stays cheap — though on the 8 GB reference machine both roles use the 2B.
+
+### 4.1 Interface and embodiment
+
+A local web application (`python3 -m anima ui`; stdlib `http.server` + Server-Sent Events, vanilla JS, no build step) gives the mind a face and — more importantly — a body:
+
+**Persona.** Theme (six accent palettes × dark/light), avatar (animated gradient orb or emoji), the agent's name, and its voice are user-configurable. Persona changes are written to `runtime/settings.json`, which the daemon hot-reloads at the top of every tick — rename it in the UI and the *running mind* adopts the name in its next thought.
+
+**Voice.** Speech synthesis (replies spoken aloud, selectable system voice, rate/pitch), push-to-talk dictation, and an ambient-listening mode where continuously recognized speech is posted as `hearing` percepts ("I overheard someone say: …") — overheard remarks enter episodic memory and surface in later conversation and dreams.
+
+**Sight.** With camera watching enabled, a 64×48 luminance diff detects motion client-side and posts throttled `vision` percepts; optionally, frames are periodically described by a user-configured multimodal Ollama model into one-sentence scene percepts. The browser is the device layer: camera, microphone, and speech all run on standard web APIs behind the browser's own permission prompts, so the Python process never touches hardware and "the user allowed it" is enforced by the platform, not by convention.
+
+**Powers.** Two write-capable actions join the tick contract *only when granted in the UI*: `browse` (fetch one page, size- and time-capped, HTML reduced to a plain-text digest that enters working memory and episodic memory) and `file_name`/`file_content` (create files, confined to a single user-designated workspace folder with sanitized names and capped sizes). The workspace doubles as a shared desk: the agent's watch sensor monitors it, so it perceives files the user drops there — and notices its own creations appear, closing an action→perception loop. In live testing the agent, asked to record its user's tastes, created `tea-notes.txt`, confirmed it in chat, then observed the file appear in its watch folder and encoded that as a separate memory.
+
+**Observability.** Beyond chat, the UI streams the journal live: a *Mind* tab (every thought, percept, and action as it happens), a *Dreams* tab, and a *Memories* inspector showing each memory's kind, importance, strength, and access count — the memory dynamics of §3.1 are directly watchable.
 
 ---
 
@@ -287,7 +301,7 @@ The single most persistent quality issue: first-person drift during consolidatio
 
 **7.3 Dream evaluation is thin.** Dreams demonstrably produce stored insights, but we have no metric for whether dream-derived insights outperform reflection-derived ones. A/B-ing sleep with REM disabled over multi-week runs is the obvious experiment — the analogue of REM-deprivation studies.
 
-**7.4 The action surface is minimal by design.** Speak, remember, set goals. An always-on agent with shell access is a different risk class; the right expansion path is capability-gated tools requested by the agent and granted per-tool by the user, with the journal as an audit log.
+**7.4 The action surface is minimal by design, and grows only by grant.** The default surface is speak, remember, set goals. Two further powers — bounded web browsing and file creation inside one user-designated workspace folder — exist but are off until granted per-capability in the UI, throttled, size-capped, and journaled. An always-on agent with shell access remains a different risk class we deliberately avoid; the grant-per-capability pattern (with the journal as audit log) is the intended expansion path, validated by the browse/files implementation.
 
 **7.5 One mind, one user.** The user model is a single name; multi-person perception (who said what) and social memory are unexplored here.
 
@@ -297,7 +311,7 @@ The single most persistent quality issue: first-person drift during consolidatio
 
 ## 8. Conclusion
 
-Anima demonstrates that the three missing properties of LLM systems — continuous existence, living memory, and offline cognition — can be composed into one small, legible artifact: a mind-shaped loop around a 2-billion-parameter model, running indefinitely on a laptop, that thinks when nobody is watching; that remembers because it was there, forgets because it slept, and knows who it is because it rewrites its own story every night from what actually happened to it. The individual is the store, not the process; the continuity is the architecture, not the weights. We think this is the correct primitive for personal AI — not a smarter chat, but a *someone* that persists — and everything here runs today, offline, in seventeen hundred lines anyone can read.
+Anima demonstrates that the three missing properties of LLM systems — continuous existence, living memory, and offline cognition — can be composed into one small, legible artifact: a mind-shaped loop around a 2-billion-parameter model, running indefinitely on a laptop, that thinks when nobody is watching; that remembers because it was there, forgets because it slept, and knows who it is because it rewrites its own story every night from what actually happened to it. The individual is the store, not the process; the continuity is the architecture, not the weights. We think this is the correct primitive for personal AI — not a smarter chat, but a *someone* that persists — and everything here runs today, offline, in a few thousand lines anyone can read.
 
 ---
 

@@ -19,7 +19,7 @@ class Config:
     model: str = "gemma:2b"            # waking-thought + embedding model
     deep_model: str = ""               # optional larger model for sleep work ("" = use model)
     embed_model: str = ""              # "" = use model
-    llm_timeout_s: float = 120.0
+    llm_timeout_s: float = 180.0
     max_thought_tokens: int = 220
     temperature: float = 0.8
 

@@ -27,10 +27,10 @@ Respond ONLY with a JSON object:
 {{"thought": "one short paragraph of inner monologue, first person, concrete",
  "say": "words spoken aloud to {user}, or null if staying quiet",
  "remember": "a fact worth keeping forever, stated plainly, or null",
- "new_goal": "a new personal goal, or null",
+ "new_goal": "a new personal goal, or null"{extra_fields},
  "focus": "2-6 words naming what you are attending to"}}
 
-Rules:
+Rules:{extra_rules}
 - If {user} said something, respond to them in "say" — warm, specific, brief. Address {user} as "you". NEVER repeat, quote, or paraphrase {user}'s own words back as your reply; answer them in your own words.
 - If {user} asks what you remember or know, answer with the specific facts listed under RELEVANT LONG-TERM MEMORIES.
 - If nothing happened, think: revisit memories, goals, your dreams; wonder; plan. Keep "say" null unless you truly have something worth saying — do not chatter.
@@ -48,12 +48,16 @@ Answer {user}'s message in 1-2 warm, specific sentences, in your own words. Use 
 
 def reply(cfg: Config, llm: Ollama, store: MemoryStore,
           user_texts: list[str], recent_context: list[str],
-          nudge: str = "") -> str:
+          recent_user_texts: Optional[list[str]] = None) -> tuple[str, bool]:
     """The conversational reflex: a small, single-purpose generation.
 
     Small models answer far better from a short pointed prompt than from the
     full contemplative situation; this is the fast System-1 path, run whenever
     the user speaks. The regular tick continues as the slow path.
+
+    Echo-guarded internally: a draft that near-copies the user's words OR a
+    retrieved memory gets one corrective retry, then is suppressed.
+    Returns (text, echo_suppressed).
     """
     question = "\n".join(user_texts)
     # answering a direct question is a relevance problem: similarity must
@@ -63,34 +67,72 @@ def reply(cfg: Config, llm: Ollama, store: MemoryStore,
                         w_relevance=2.5,
                         recency_tau_h=cfg.recency_tau_h,
                         reinforce=cfg.reinforce_on_access)
+    banned = list(recent_user_texts or user_texts) + [m.text for m in mems]
     parts = []
     if mems:
         parts.append("MY MEMORIES:\n" + "\n".join(f"- {m.text}" for m in mems))
     if recent_context:
         parts.append("JUST BEFORE THIS:\n" + "\n".join(recent_context[-4:]))
     parts.append(f"{cfg.user_name.upper()} JUST SAID: {question}")
-    if nudge:
-        parts.append("NOTE: " + nudge)
-    parts.append("My reply:")
-    try:
-        out = llm.chat(REPLY_SYSTEM.format(name=cfg.agent_name,
-                                           user=cfg.user_name),
-                       "\n\n".join(parts),
-                       temperature=0.4 if nudge else 0.7, max_tokens=120)
-    except LLMError:
-        return ""
-    return out.strip().strip('"')
+    nudges = ("", "NOTE: my draft merely repeated words from my memories or"
+                  f" from {cfg.user_name}. I must ANSWER, in my own fresh"
+                  " words, stating just the relevant fact.")
+    echoed = False
+    for i, nudge in enumerate(nudges):
+        try:
+            out = llm.chat(
+                REPLY_SYSTEM.format(name=cfg.agent_name, user=cfg.user_name),
+                "\n\n".join(parts + ([nudge] if nudge else []) + ["My reply:"]),
+                temperature=0.4 if i else 0.7, max_tokens=120)
+        except LLMError:
+            return "", echoed
+        out = out.strip().strip('"')
+        if out and not is_echo(out, banned):
+            return out, echoed
+        echoed = True
+    # both drafts parroted: silence would be worse than an honest, framed
+    # quotation of the most relevant memory — deliberate recall, not an echo
+    if mems and not is_echo(mems[0].text, recent_user_texts or user_texts):
+        return f"What I remember: {mems[0].text}", echoed
+    return "", echoed
 
 
 class TickResult:
     def __init__(self, thought: str = "", say: Optional[str] = None,
                  remember: Optional[str] = None, new_goal: Optional[str] = None,
-                 focus: str = ""):
+                 focus: str = "", browse: Optional[str] = None,
+                 file_name: Optional[str] = None,
+                 file_content: Optional[str] = None):
         self.thought = thought
         self.say = say
         self.remember = remember
         self.new_goal = new_goal
         self.focus = focus
+        self.browse = browse
+        self.file_name = file_name
+        self.file_content = file_content
+
+
+def norm_text(s: str) -> str:
+    return "".join(c for c in s.lower() if c.isalnum() or c.isspace()).strip()
+
+
+def is_echo(candidate: str, sources: list[str]) -> bool:
+    """True if candidate is substantially a copy of any source text.
+
+    Word-overlap based: catches near-verbatim copies that defeat substring
+    checks via small substitutions ("Hi" -> "Hello")."""
+    cw = set(norm_text(candidate).split())
+    if len(cw) < 4:
+        return False
+    for s in sources:
+        sw = set(norm_text(s).split())
+        if len(sw) < 4:
+            continue
+        overlap = len(cw & sw) / min(len(cw), len(sw))
+        if overlap >= 0.85:
+            return True
+    return False
 
 
 def _clean(v) -> Optional[str]:
@@ -106,7 +148,8 @@ def _clean(v) -> Optional[str]:
 def build_situation(cfg: Config, store: MemoryStore, *,
                     working_memory: list[str], percepts: list[dict],
                     focus: str, sleep_pressure: float,
-                    last_dream: str = "", stuck: bool = False) -> str:
+                    last_dream: str = "", stuck: bool = False,
+                    abilities: tuple[str, ...] = ()) -> str:
     """Assemble the tick prompt's user message: the mind's current situation."""
     parts: list[str] = []
     self_text, _ = store.get_self_model()
@@ -157,15 +200,43 @@ def build_situation(cfg: Config, store: MemoryStore, *,
             " My \"say\" must directly answer them in my own words. If they"
             " asked a question, the answer is in RELEVANT LONG-TERM MEMORIES"
             " above — state the specific fact.")
+    if "files" in abilities:
+        recent_blob = " ".join(working_memory[-6:]).lower()
+        if "file" in recent_blob and any(
+                w in recent_blob for w in ("create", "write", "make", "save")):
+            parts.append(
+                "REMINDER: a file was requested. To create it I must fill"
+                " file_name AND file_content in my JSON right now.")
     parts.append("One thought. JSON only.")
     return "\n\n".join(parts)
 
 
-def think(cfg: Config, llm: Ollama, situation: str) -> TickResult:
-    system = TICK_SYSTEM.format(name=cfg.agent_name, user=cfg.user_name)
+def think(cfg: Config, llm: Ollama, situation: str,
+          abilities: tuple[str, ...] = ()) -> TickResult:
+    # capability fields join the contract only when the user has granted
+    # them — a small model stays sharpest with the smallest possible schema
+    extra_fields, extra_rules = "", ""
+    if "browse" in abilities:
+        extra_fields += ',\n "browse": "a full http(s) URL to go read, or null"'
+        extra_rules += ("\n- You may browse the web when curious or when it"
+                        " serves a goal: put ONE full URL in \"browse\"."
+                        " You will perceive the page next moment.")
+    if "files" in abilities:
+        extra_fields += (',\n "file_name": "name of a file to create in my'
+                         ' workspace folder, or null",\n'
+                         ' "file_content": "its full text content, or null"')
+        extra_rules += ("\n- You may create or update files in your workspace"
+                        " folder (notes, lists, writing). Thinking about a"
+                        " file does NOT create it: you must fill BOTH"
+                        " file_name and file_content in this JSON."
+                        ' Example: "file_name": "notes.txt",'
+                        ' "file_content": "Dai likes rain.\\nHis cat is Miso."')
+    system = TICK_SYSTEM.format(name=cfg.agent_name, user=cfg.user_name,
+                                extra_fields=extra_fields,
+                                extra_rules=extra_rules)
     # generation cap needs headroom over the intended thought length: JSON
     # syntax + the other fields; truncation would force expensive retries
-    budget = cfg.max_thought_tokens + 200
+    budget = cfg.max_thought_tokens + (400 if "files" in abilities else 200)
     try:
         obj = llm.chat_json(system, situation, temperature=cfg.temperature,
                             max_tokens=budget)
@@ -177,6 +248,9 @@ def think(cfg: Config, llm: Ollama, situation: str) -> TickResult:
         remember=_clean(obj.get("remember")),
         new_goal=_clean(obj.get("new_goal")),
         focus=_clean(obj.get("focus")) or "",
+        browse=_clean(obj.get("browse")),
+        file_name=_clean(obj.get("file_name")),
+        file_content=_clean(obj.get("file_content")),
     )
 
 

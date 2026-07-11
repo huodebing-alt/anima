@@ -30,8 +30,23 @@ ollama pull gemma:2b            # or any small chat model you prefer
 git clone https://github.com/huodebing-alt/anima.git && cd anima
 
 python3 -m anima run &          # the mind wakes up
-python3 -m anima talk           # chat with it (--thoughts streams its inner monologue)
+python3 -m anima ui             # → http://localhost:8765  (the web app)
+python3 -m anima talk           # …or chat in the terminal (--thoughts streams its inner monologue)
 ```
+
+## The web UI
+
+`python3 -m anima ui` serves a modern local web app (pure stdlib server, no build step, nothing leaves your machine):
+
+- 💬 **Chat** with live streaming — plus **Mind** (watch it think in real time), **Dreams** (its dream journal), and **Memories** (inspect importance / strength / access counts of every memory).
+- 🎨 **Make it yours** — six color themes, dark & light mode, gradient-orb or emoji avatars, and a custom agent name (it genuinely adopts the name — the running mind hot-reloads its persona).
+- 🗣️ **Voice** — it speaks its replies aloud (pick any system voice, tune rate & pitch), you can dictate messages by mic, and an optional *ambient listening* mode turns overheard speech into percepts it remembers.
+- 👁️ **Camera watching** (opt-in) — motion in the room becomes percepts; add a multimodal Ollama model and it periodically *describes what it sees*.
+- 🔓 **Senses & powers, gated by you** — every capability is **off until you grant it** in Settings: internet browsing (it reads one page at a time, size-capped), and file creation confined to a single **workspace folder** you designate (path-traversal-proof, size-capped, and it watches that folder too — it notices what you drop there and what it creates itself).
+
+Camera, microphone, and speech all run on standard browser APIs behind the browser's own permission prompts — the Python side never touches your devices.
+
+
 
 Watch its life:
 
@@ -105,7 +120,7 @@ During sleep, every memory's strength decays exponentially; stability grows with
 No claim of phenomenal consciousness. "Consistent consciousness" here is an engineering target: behavioral and narrative continuity of one individual over unbounded time. The design paper is explicit about what the 2B substrate can and cannot carry.
 
 **Q: Is it safe to leave running?**
-The action surface is deliberately tiny: speak, remember, set goals. No shell, no browsing, no tool execution. Everything it does is auditable in `runtime/journal.jsonl`.
+The default action surface is deliberately tiny: speak, remember, set goals. Internet browsing and file creation exist but are **off until you grant them** in the UI, are throttled and size-capped, and file writes are confined to one workspace folder you choose. There is no shell access. Everything it does is auditable in `runtime/journal.jsonl`.
 
 **Q: How is it tested?**
 17 deterministic unit tests for the memory mathematics (no LLM needed) plus a 14-check live integration test that drives a real daemon through boot → idle thinking → conversation → sleep/dream → process death → resurrection-with-recall. Latest run: **14/14 passing**.
@@ -119,8 +134,11 @@ anima/            the package (pure stdlib Python)
   sleep.py        consolidation, reflection, dreams, forgetting, self-model
   store.py        SQLite long-term memory: scoring, reinforcement, decay
   sensors.py      perception: user inbox, clock, watched folder
+  capabilities.py gated powers: bounded web browsing + workspace file writes
   llm.py          minimal Ollama client (chat, JSON mode, embeddings)
+  server.py       the web UI server: JSON API + SSE stream (stdlib http.server)
   config.py       every timescale is tunable — a whole life can run in minutes
+ui/               the web app (vanilla HTML/CSS/JS, no build step)
 tests/            17 unit tests + full life-cycle integration test
 docs/             design paper + related-work research digest
 ```

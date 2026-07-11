@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Anima</title>
+<link rel="stylesheet" href="/style.css">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><circle cx='50' cy='50' r='42' fill='%238b5cf6'/></svg>">
+</head>
+<body data-mode="dark" data-theme="aurora">
+
+<header id="topbar">
+  <div class="identity">
+    <div id="avatar" class="avatar orb" title="Anima">
+      <span id="avatarEmoji" class="avatar-emoji hidden"></span>
+      <span id="moon" class="moon hidden">☾</span>
+    </div>
+    <div class="who">
+      <div id="agentName" class="agent-name">Anima</div>
+      <div class="status-line">
+        <span id="statusDot" class="dot"></span>
+        <span id="statusText">connecting…</span>
+      </div>
+    </div>
+  </div>
+
+  <nav id="tabs">
+    <button class="tab active" data-tab="chat">Chat</button>
+    <button class="tab" data-tab="mind">Mind</button>
+    <button class="tab" data-tab="dreams">Dreams</button>
+    <button class="tab" data-tab="memories">Memories</button>
+  </nav>
+
+  <div class="controls">
+    <div class="fatigue" title="sleep pressure">
+      <div id="fatigueBar"></div>
+    </div>
+    <button id="earBtn" class="icon-btn" title="Ambient listening (mic stays on)">
+      <svg viewBox="0 0 24 24"><path d="M12 3a6 6 0 0 0-6 6h2a4 4 0 1 1 8 0c0 2-1.2 3-2.4 4.1C12.4 14.2 11 15.5 11 18a3 3 0 0 0 6 0h-2a1 1 0 0 1-2 0c0-1.6.8-2.4 2-3.5C16.4 13.2 18 11.7 18 9a6 6 0 0 0-6-6z"/></svg>
+    </button>
+    <button id="camBtn" class="icon-btn" title="Camera watching">
+      <svg viewBox="0 0 24 24"><path d="M4 7h3l2-2h6l2 2h3a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V8a1 1 0 0 1 1-1zm8 10a5 5 0 1 0 0-10 5 5 0 0 0 0 10zm0-2a3 3 0 1 1 0-6 3 3 0 0 1 0 6z"/></svg>
+    </button>
+    <button id="modeBtn" class="icon-btn" title="Light / dark">
+      <svg viewBox="0 0 24 24"><path d="M12 6.5A5.5 5.5 0 1 0 12 17.5 5.5 5.5 0 0 0 12 6.5zM11 1h2v3h-2V1zm0 19h2v3h-2v-3zM1 11h3v2H1v-2zm19 0h3v2h-3v-2zM3.5 4.9 4.9 3.5l2.2 2.2-1.5 1.4L3.5 4.9zm13.4 13.5 1.4-1.5 2.2 2.2-1.4 1.4-2.2-2.1zM3.5 19.1l2.1-2.2 1.5 1.4-2.2 2.2-1.4-1.4zM16.9 5.7l2.2-2.2 1.4 1.4-2.2 2.2-1.4-1.4z"/></svg>
+    </button>
+    <button id="settingsBtn" class="icon-btn" title="Settings">
+      <svg viewBox="0 0 24 24"><path d="M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8zm9 4a7 7 0 0 0-.1-1.2l2-1.5-2-3.5-2.4 1a7.6 7.6 0 0 0-2-1.2L16 3h-4l-.5 2.6a7.6 7.6 0 0 0-2 1.2l-2.4-1-2 3.5 2 1.5A7 7 0 0 0 7 12a7 7 0 0 0 .1 1.2l-2 1.5 2 3.5 2.4-1a7.6 7.6 0 0 0 2 1.2L12 21h4l.5-2.6a7.6 7.6 0 0 0 2-1.2l2.4 1 2-3.5-2-1.5A7 7 0 0 0 21 12z"/></svg>
+    </button>
+  </div>
+</header>
+
+<div id="camStrip" class="hidden">
+  <video id="camVideo" autoplay playsinline muted></video>
+  <span class="watching"><span class="rec"></span> watching</span>
+</div>
+
+<main>
+  <!-- CHAT -->
+  <section id="view-chat" class="view active">
+    <div id="chatLog" class="scroll"></div>
+    <div id="composer">
+      <button id="micBtn" class="icon-btn big" title="Dictate (hold or click to toggle)">
+        <svg viewBox="0 0 24 24"><path d="M12 15a3 3 0 0 0 3-3V6a3 3 0 1 0-6 0v6a3 3 0 0 0 3 3zm6-3a6 6 0 0 1-12 0H4a8 8 0 0 0 7 7.9V22h2v-2.1A8 8 0 0 0 20 12h-2z"/></svg>
+      </button>
+      <textarea id="input" rows="1" placeholder="Say something…"></textarea>
+      <button id="sendBtn" class="icon-btn big accent" title="Send">
+        <svg viewBox="0 0 24 24"><path d="M3 11.5 21 3l-8.5 18-2.3-7.2L3 11.5z"/></svg>
+      </button>
+    </div>
+  </section>
+
+  <!-- MIND -->
+  <section id="view-mind" class="view">
+    <div id="mindLog" class="scroll wide"></div>
+  </section>
+
+  <!-- DREAMS -->
+  <section id="view-dreams" class="view">
+    <div id="dreamLog" class="scroll wide"></div>
+  </section>
+
+  <!-- MEMORIES -->
+  <section id="view-memories" class="view">
+    <div class="mem-filter">
+      <select id="memKind">
+        <option value="">all kinds</option>
+        <option>episodic</option><option>semantic</option>
+        <option>reflection</option><option>dream</option>
+        <option>insight</option><option>procedural</option>
+      </select>
+      <button id="memRefresh" class="pill-btn">refresh</button>
+      <button id="selfBtn" class="pill-btn">self-model</button>
+    </div>
+    <div id="memLog" class="scroll wide"></div>
+  </section>
+</main>
+
+<!-- SETTINGS DRAWER -->
+<div id="scrim" class="hidden"></div>
+<aside id="drawer" class="hidden">
+  <h2>Settings</h2>
+
+  <h3>Appearance</h3>
+  <div class="row"><label>Theme</label>
+    <div id="swatches" class="swatches"></div>
+  </div>
+  <div class="row"><label>Mode</label>
+    <div class="seg">
+      <button data-mode="dark" class="seg-btn">Dark</button>
+      <button data-mode="light" class="seg-btn">Light</button>
+    </div>
+  </div>
+  <div class="row"><label>Avatar</label>
+    <div id="avatars" class="avatars"></div>
+  </div>
+
+  <h3>Identity</h3>
+  <div class="row"><label for="setAgentName">Agent name</label>
+    <input id="setAgentName" maxlength="24" placeholder="Anima"></div>
+  <div class="row"><label for="setUserName">Your name</label>
+    <input id="setUserName" maxlength="24" placeholder="you"></div>
+
+  <h3>Voice</h3>
+  <div class="row"><label for="setVoice">Voice</label>
+    <select id="setVoice"></select></div>
+  <div class="row"><label for="setRate">Rate <span id="rateVal"></span></label>
+    <input id="setRate" type="range" min="0.6" max="1.6" step="0.05"></div>
+  <div class="row"><label for="setPitch">Pitch <span id="pitchVal"></span></label>
+    <input id="setPitch" type="range" min="0.5" max="1.8" step="0.05"></div>
+  <div class="row toggle-row"><label for="setAutoSpeak">Speak replies aloud</label>
+    <input id="setAutoSpeak" type="checkbox" class="switch"></div>
+  <button id="testVoice" class="pill-btn">Test voice</button>
+
+  <h3>Senses &amp; powers <span class="hint">each one is off until you grant it</span></h3>
+  <div class="row toggle-row"><label>Ambient listening <span class="hint">overheard speech becomes percepts</span></label>
+    <input id="setEar" type="checkbox" class="switch"></div>
+  <div class="row toggle-row"><label>Camera watching <span class="hint">motion &amp; scenes become percepts</span></label>
+    <input id="setCam" type="checkbox" class="switch"></div>
+  <div class="row"><label for="setVisionModel">Vision model <span class="hint">optional, e.g. a multimodal Ollama model; empty = motion only</span></label>
+    <input id="setVisionModel" placeholder="(none)"></div>
+  <div class="row toggle-row"><label>Browse the internet <span class="hint">it may read one web page at a time</span></label>
+    <input id="setBrowse" type="checkbox" class="switch"></div>
+  <div class="row toggle-row"><label>Create files <span class="hint">only inside the workspace folder below</span></label>
+    <input id="setFiles" type="checkbox" class="switch"></div>
+  <div class="row"><label for="setWorkspace">Workspace folder <span class="hint">the only place it can write; it also watches this folder</span></label>
+    <input id="setWorkspace" placeholder="~/anima-workspace"></div>
+
+  <h3>Life</h3>
+  <div class="btn-row">
+    <button id="sleepBtn" class="pill-btn">Sleep now</button>
+    <button id="stopBtn" class="pill-btn danger">Stop the mind</button>
+  </div>
+
+  <button id="saveBtn" class="save-btn">Save</button>
+  <div id="saveNote" class="hint center"></div>
+</aside>
+
+<script src="/app.js"></script>
+</body>
+</html>

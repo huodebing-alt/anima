@@ -18,13 +18,25 @@ from typing import Iterator
 
 
 class InboxSensor:
-    """User messages / control commands as one-JSON-file-per-message."""
+    """Messages, control commands, and injected percepts — one JSON file each.
+
+    Besides user chat ({"text": ...}) and control ({"kind": "control"}),
+    external device layers (e.g. the web UI's camera/microphone) can inject
+    arbitrary percepts by specifying source/kind/importance:
+      {"text": "...", "source": "vision", "kind": "observation",
+       "importance": 0.5}
+    """
 
     def __init__(self, inbox_dir: Path):
         self.dir = inbox_dir
 
     def poll(self) -> Iterator[dict]:
         for p in sorted(self.dir.glob("*.json")):
+            born = 0.0
+            try:  # filenames start with the drop timestamp
+                born = float(p.name.split("-")[0])
+            except ValueError:
+                pass
             try:
                 msg = json.loads(p.read_text())
             except (json.JSONDecodeError, OSError):
@@ -35,11 +47,20 @@ class InboxSensor:
                 pass
             if not msg or not msg.get("text"):
                 continue
+            # a stale control command must not fire on a later boot: the
+            # daemon it addressed is gone (e.g. "stop" outliving a restart)
+            if msg.get("kind") == "control" and born and \
+                    time.time() - born > 120:
+                continue
+            try:
+                importance = max(0.0, min(1.0, float(msg.get("importance", 0.6))))
+            except (TypeError, ValueError):
+                importance = 0.6
             yield {
-                "source": "user",
+                "source": str(msg.get("source", "user"))[:24],
                 "kind": msg.get("kind", "message"),
                 "text": str(msg["text"])[:4000],
-                "importance": 0.6,
+                "importance": importance,
                 "ts": time.time(),
             }
 

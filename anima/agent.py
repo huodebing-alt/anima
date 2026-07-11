@@ -30,7 +30,7 @@ import time
 from pathlib import Path
 from typing import Optional
 
-from . import cognition, sleep as sleep_mod
+from . import capabilities, cognition, sleep as sleep_mod
 from .config import Config
 from .llm import LLMError, Ollama
 from .sensors import ClockSensor, InboxSensor, WatchSensor
@@ -64,6 +64,15 @@ class Mind:
         self.last_thought = ""
         self.repeat_streak = 0
         self.recent_user_texts: list[str] = []  # echo-check window
+
+        # user-granted powers (via UI -> runtime/settings.json, hot-reloaded)
+        self.allow_browse = False
+        self.allow_files = False
+        self.workspace_dir = ""
+        self.last_browse_ts = 0.0
+        self.last_file_ts = 0.0
+        self._settings_mtime = 0.0
+        self._load_ui_settings()
         self._stop = False
         self._force_sleep = False
 
@@ -86,8 +95,9 @@ class Mind:
 
     # ------------------------------------------------------------------
     def journal(self, kind: str, data: dict) -> None:
-        entry = {"ts": time.time(), "kind": kind}
+        entry = {"ts": time.time()}
         entry.update(data)
+        entry["kind"] = kind  # authoritative — data must not clobber it
         with open(self.cfg.journal_path, "a") as f:
             f.write(json.dumps(entry, ensure_ascii=False) + "\n")
 
@@ -141,25 +151,55 @@ class Mind:
         elif cmd == "stop":
             self._stop = True
 
+    def _load_ui_settings(self) -> None:
+        """Hot-reload persona and granted powers written by the web UI."""
+        p = self.cfg.runtime / "settings.json"
+        try:
+            mtime = p.stat().st_mtime
+        except OSError:
+            return
+        if mtime == self._settings_mtime:
+            return
+        self._settings_mtime = mtime
+        try:
+            s = json.loads(p.read_text())
+        except (OSError, json.JSONDecodeError):
+            return
+        if s.get("agent_name"):
+            self.cfg.agent_name = str(s["agent_name"]).strip()[:40]
+        if s.get("user_name"):
+            self.cfg.user_name = str(s["user_name"]).strip()[:40]
+        self.allow_browse = bool(s.get("allow_browse"))
+        self.allow_files = bool(s.get("allow_files"))
+        ws = str(s.get("workspace_dir") or "").strip()
+        ws_expanded = str(Path(ws).expanduser()) if ws else ""
+        if ws_expanded != self.workspace_dir:
+            self.workspace_dir = ""
+            if ws:
+                path = Path(ws).expanduser()
+                try:
+                    path.mkdir(parents=True, exist_ok=True)
+                    self.workspace_dir = str(path)
+                    # the workspace is also watched: the agent notices what
+                    # the user (or it) puts there
+                    self.sensors = [x for x in self.sensors
+                                    if not isinstance(x, WatchSensor)]
+                    self.sensors.append(WatchSensor(path))
+                    self.journal("grant", {"text": f"workspace: {path}"})
+                except OSError as e:
+                    self.journal("error", {"text": f"workspace grant failed: {e}"})
+
     @staticmethod
     def _norm(s: str) -> str:
-        return "".join(c for c in s.lower() if c.isalnum() or c.isspace()).strip()
+        return cognition.norm_text(s)
 
     def _is_echo(self, say: str, user_texts: list[str]) -> bool:
-        """True if the reply is substantially the user's own words."""
-        ns = self._norm(say)
-        if not ns:
-            return False
-        for t in user_texts:
-            nt = self._norm(t)
-            if not nt:
-                continue
-            if ns == nt or (len(ns) > 20 and (ns in nt or nt in ns)):
-                return True
-        return False
+        """True if the text is substantially the user's own words."""
+        return cognition.is_echo(say, user_texts)
 
     # ------------------------------------------------------------------
     def tick(self) -> None:
+        self._load_ui_settings()
         percepts = self.perceive()
         user_spoke = any(p["source"] == "user" for p in percepts)
         if user_spoke:
@@ -169,46 +209,50 @@ class Mind:
         user_texts = [p["text"] for p in percepts if p["source"] == "user"]
         self.recent_user_texts = (self.recent_user_texts + user_texts)[-4:]
 
+        # journal percepts immediately so the record keeps lived order
+        # (perceive -> reply), even though memory encoding happens later
+        for p in percepts:
+            self.journal("percept", p)
+
         # fast path — the conversational reflex: when the user speaks, answer
         # from a small pointed prompt. This runs BEFORE the percept is encoded,
         # so the question cannot be retrieved as a "memory" and parroted back.
+        # reply() echo-guards itself (against user words AND its own memories).
         if user_texts:
-            answer = cognition.reply(self.cfg, self.llm, self.store,
-                                     user_texts, self.working_memory)
-            if answer and self._is_echo(answer, self.recent_user_texts):
-                self.journal("echo_suppressed", {"text": answer})
-                answer = cognition.reply(
-                    self.cfg, self.llm, self.store, user_texts,
-                    self.working_memory,
-                    nudge="My draft reply merely repeated the words back."
-                          " I must answer with the specific facts from MY"
-                          " MEMORIES, in my own words.")
-                if answer and self._is_echo(answer, self.recent_user_texts):
-                    answer = ""
+            answer, echoed = cognition.reply(
+                self.cfg, self.llm, self.store, user_texts,
+                self.working_memory, self.recent_user_texts)
+            if echoed:
+                self.journal("echo_suppressed", {"text": answer or "(silent)"})
             if answer:
                 self.speak(answer)
 
-        # encode user percepts as episodic memories; importance gets a default
-        # now and is refined offline during sleep (salience tagging) — no LLM
-        # scoring on the hot path
+        # encode percepts as episodic memories; importance gets a default now
+        # and is refined offline during sleep (salience tagging) — no LLM
+        # scoring on the hot path. User speech always encodes; other senses
+        # (watch folder, vision, hearing) encode only when notable.
         for p in percepts:
             if p["source"] == "user":
                 self.store.remember(
                     "episodic", f"{self.cfg.user_name} said: {p['text']}",
                     importance=0.55, source="user")
-            elif p["source"] == "watch":
+            elif p["importance"] >= 0.45:
                 self.store.remember("episodic", p["text"],
-                                    importance=p["importance"], source="watch")
+                                    importance=p["importance"],
+                                    source=p["source"])
             self.working_memory.append(f"({p['source']}) {p['text']}")
-            self.journal("percept", p)
 
         # slow path — the contemplative tick: inner monologue and actions
+        abilities = tuple(
+            a for a, on in (("browse", self.allow_browse),
+                            ("files", self.allow_files and self.workspace_dir))
+            if on)
         situation = cognition.build_situation(
             self.cfg, self.store, working_memory=self.working_memory,
             percepts=percepts, focus=self.focus,
             sleep_pressure=self.sleep_pressure, last_dream=self.last_dream,
-            stuck=self.repeat_streak >= 2)
-        result = cognition.think(self.cfg, self.llm, situation)
+            stuck=self.repeat_streak >= 2, abilities=abilities)
+        result = cognition.think(self.cfg, self.llm, situation, abilities)
         if user_texts:
             result.say = None  # the reflex already answered; don't double-speak
         elif result.say and self._is_echo(result.say, self.recent_user_texts):
@@ -244,6 +288,39 @@ class Mind:
                                                  self.recent_user_texts):
             self.store.add_goal(result.new_goal)
             self.journal("goal", {"text": result.new_goal})
+
+        # granted powers — throttled, bounded, and journaled
+        if result.browse and "browse" in abilities and \
+                time.time() - self.last_browse_ts >= 120:
+            self.last_browse_ts = time.time()
+            try:
+                digest = capabilities.browse(result.browse)
+                note = f"I browsed {result.browse} and read: {digest}"
+                self.journal("browse", {"url": result.browse,
+                                        "text": digest[:400]})
+            except Exception as e:  # noqa: BLE001 — any fetch failure is a percept
+                note = f"I tried to browse {result.browse} but failed: {e}"
+                self.journal("browse", {"url": result.browse, "error": str(e)})
+            self.working_memory.append(note)
+            self.store.remember("episodic", note[:1200], importance=0.5,
+                                source="self.browse")
+        if result.file_name and result.file_content and "files" in abilities \
+                and time.time() - self.last_file_ts >= 60:
+            self.last_file_ts = time.time()
+            try:
+                path = capabilities.write_file(
+                    Path(self.workspace_dir), result.file_name,
+                    result.file_content)
+                self.journal("file", {"path": str(path),
+                                      "bytes": len(result.file_content)})
+                self.working_memory.append(f"I wrote the file {path.name}"
+                                           " in my workspace.")
+                self.store.remember(
+                    "episodic", f"I created the file {path.name} in my"
+                    f" workspace. It contains: {result.file_content[:200]}",
+                    importance=0.5, source="self.file")
+            except (ValueError, OSError) as e:
+                self.journal("file", {"error": str(e)})
 
         # adaptive heartbeat: quiet ticks slow the mind down
         if user_spoke or percepts:

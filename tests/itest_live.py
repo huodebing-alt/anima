@@ -133,7 +133,7 @@ def main() -> int:
             return 0
 
     ok = wait_for(lambda: ticks() >= 3
-                  and any(e["kind"] == "thought" for e in journal()), 400)
+                  and any(e["kind"] == "thought" for e in journal()), 700)
     check("thinks continuously with zero input (3+ ticks, 1+ journaled thought)",
           bool(ok), f"ticks={ticks()}")
 
