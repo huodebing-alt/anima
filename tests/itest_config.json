@@ -1,0 +1,13 @@
+{
+  "model": "gemma:2b",
+  "runtime_dir": "tests/_itest_runtime",
+  "watch_dir": "tests/_itest_runtime/watch",
+  "tick_base_s": 2.0,
+  "tick_max_s": 20.0,
+  "fatigue_sleep_threshold": 200.0,
+  "idle_before_sleep_s": 4.0,
+  "proactive_min_gap_s": 20.0,
+  "dreams_per_sleep": 1,
+  "max_thought_tokens": 180,
+  "llm_timeout_s": 300.0
+}
